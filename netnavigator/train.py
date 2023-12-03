@@ -6,7 +6,7 @@ import time
 import torch
 import torch.nn as nn
 
-from benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
+from dataset import BenchmarkLMDataset, collate_sentences_lm
 from torch.distributed import rpc
 
 from torch.distributed.pipeline.sync import Pipe
