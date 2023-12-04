@@ -4,9 +4,9 @@ from torch.optim import Adam
 from torch.optim import Adam
 import math
 import argparse
+import pprint
 
 iteration_count = 0
-# device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 device = torch.device("cpu")
 
 class EmbeddingLayer(nn.Embedding):
@@ -115,6 +115,16 @@ def generate_balance(num_devices, num_layers):
             layers_assigned += math.ceil(x)
     return balance
 
+def extract_layer_info(layer):
+    """
+    Recursively extract layer information, handling layers with nested sub-layers.
+    """
+    sub_layers = list(layer.named_children())
+    if sub_layers:
+        return [f"{sub_layer_name}: {extract_layer_info(sub_layer)}" for sub_layer_name, sub_layer in sub_layers]
+    else:
+        return repr(layer)
+
 def make_partition(model, args):
     """
     Given sequential model, splits layers up according to number of the devices and
@@ -129,25 +139,19 @@ def make_partition(model, args):
         layers_info = []
         for _ in range(num_layers):
             layer = model[pipe_idx]
-            # print(layer.__dict__)
-            # layer_info = {
-            #     'operation': type(layer).__name__,
-            #     'num_parameters': sum(p.numel() for p in layer.parameters())
-            # }
-            layer_info = repr(layer)
+            layer_info = extract_layer_info(layer)
             layers_info.append(layer_info)
             pipe_idx += 1
         device = device_idx if devices is None else devices[device_idx]
         partitioned_model_info[device] = layers_info
         device_idx += 1
-
-    print(partitioned_model_info)
     return partitioned_model_info
     
 
 def runner(args):
     model = make_model(args)
     partition = make_partition(model, args)
+    pprint.pprint(partition)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="build parallelizable LLM")
