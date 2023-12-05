@@ -11,7 +11,6 @@ device = torch.device("cpu")
 
 class EmbeddingLayer(nn.Embedding):
     def __init__(self, ntoken, ninp, initrange):
-        print(ntoken, ninp, initrange)
         super().__init__(ntoken, ninp)
         self.ninp = ninp
         nn.init.uniform_(self.weight, -initrange, initrange)
@@ -114,34 +113,41 @@ def generate_balance(num_devices, num_layers):
 def extract_layer_info(layer):
     """
     Recursively extract layer information, handling layers with nested sub-layers.
+    Ignoring Dropout layers and returning input and output features for each layer.
     """
     sub_layers = list(layer.named_children())
+    layer_infos = []
+    layer_info = {}
     if sub_layers:
-        return [f"{sub_layer_name}: {extract_layer_info(sub_layer)}" for sub_layer_name, sub_layer in sub_layers]
+        for sub_layer_name, sub_layer in sub_layers:
+            # layers to ignore
+            if isinstance(sub_layer, nn.Dropout):
+                continue
+            layer_infos.extend(extract_layer_info(sub_layer))
     else:
-        return repr(layer)
+        layer_info['type'] = layer.__class__.__name__
+        if isinstance(layer, nn.Linear):
+            layer_info['input_features'] = layer.in_features
+            layer_info['output_features'] = layer.out_features
+            layer_info['bias_terms'] = layer.bias.nelement() if layer.bias is not None else 0
+        elif isinstance(layer, nn.Embedding):
+            layer_info['input_features'] = layer.num_embeddings
+            layer_info['output_features'] = layer.embedding_dim
+    if layer_info:
+        layer_infos.append(layer_info)
+    return layer_infos
 
 def make_partition(model, args):
     """
-    Given sequential model, splits layers up according to number of the devices and
+    Given sequential model, splits up layers
     return partition 
     """
-    balance = generate_balance(args.num_devices, len(model))
-    devices = range(args.num_devices)
-    device_idx = 0
-    pipe_idx = 0
-    partitioned_model_info = {}
-    for num_layers in balance:
-        layers_info = []
-        for _ in range(num_layers):
-            layer = model[pipe_idx]
-            layer_info = extract_layer_info(layer)
-            layers_info.append(layer_info)
-            pipe_idx += 1
-        device = device_idx if devices is None else devices[device_idx]
-        partitioned_model_info[device] = layers_info
-        device_idx += 1
-    return partitioned_model_info
+    partition_info = []
+    for layer in model:
+        layer_info = extract_layer_info(layer)
+        if layer_info:
+            partition_info.append(layer_info)
+    return partition_info
     
 
 def runner(args):
