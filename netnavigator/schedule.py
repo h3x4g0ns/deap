@@ -93,7 +93,7 @@ def make_model(args):
     ).to(device)
     return model
 
-def extract_layer_info(layer):
+def extract_layer_info(layer, batch_size):
     """
     Recursively extract layer information, handling layers with nested sub-layers.
     Ignoring Dropout layers and returning input and output features for each layer.
@@ -106,24 +106,41 @@ def extract_layer_info(layer):
     """
     sub_layers = list(layer.named_children())
     layer_infos = []
-    layer_info = {}
+    l = {}
     if sub_layers:
         for sub_layer_name, sub_layer in sub_layers:
             # layers to ignore
             if isinstance(sub_layer, nn.Dropout):
                 continue
-            layer_infos.extend(extract_layer_info(sub_layer))
+            layer_infos.extend(extract_layer_info(sub_layer, batch_size))
     else:
-        layer_info['type'] = layer.__class__.__name__
+        l['type'] = layer.__class__.__name__
         if isinstance(layer, nn.Linear):
-            layer_info['input_features'] = layer.in_features
-            layer_info['output_features'] = layer.out_features
-            layer_info['bias_terms'] = layer.bias.nelement() if layer.bias is not None else 0
+            l["C"] = batch_size
+            l["Hdilation"] = 1
+            l["Hstride"] = 1
+            l["K"] = batch_size
+            l["N"] = 1
+            l["P"] = layer.out_features
+            l["Q"] = 1
+            l["R"] = 1
+            l["S"] = 1
+            l["Wstride"] = 1
+            l["Wdilation"] = 1
         elif isinstance(layer, nn.Embedding):
-            layer_info['input_features'] = layer.num_embeddings
-            layer_info['output_features'] = layer.embedding_dim
-    if layer_info:
-        layer_infos.append(layer_info)
+            l["C"] = batch_size
+            l["Hdilation"] = 1
+            l["Hstride"] = 1
+            l["K"] = batch_size
+            l["N"] = 1
+            l["P"] = layer.embedding_dim
+            l["Q"] = 1
+            l["R"] = 1
+            l["S"] = 1
+            l["Wstride"] = 1
+            l["Wdilation"] = 1
+    if l:
+        layer_infos.append(l)
     return layer_infos
 
 def make_partition(model, args):
@@ -132,23 +149,23 @@ def make_partition(model, args):
     """
     partition_info = []
     for layer in model:
-        layer_info = extract_layer_info(layer)
+        layer_info = extract_layer_info(layer, args.batch_size)
         if layer_info:
-            partition_info.append(layer_info)
+            partition_info.extend(layer_info)
     return partition_info
 
-def schedule_model(model, args):
+def schedule_model(partition, args):
     """
     Takes model partition and schedules it to number of layers
     """
     blocks = 4
-    pass
+    return partition
 
 def runner(args):
     model = make_model(args).eval()
     partition = make_partition(model, args)
+    accelerator = schedule_model(partition, args)
     pprint.pprint(partition)
-    accelerator = schedule_model(model, args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="build parallelizable LLM")
