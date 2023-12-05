@@ -93,27 +93,16 @@ def make_model(args):
     ).to(device)
     return model
 
-def generate_balance(num_devices, num_layers):
-    """
-    Distribute layers across multiple devices, returns the distribution of
-    layers across the devices.
-    """
-    balance = []
-    layers_assigned = 0
-    for i in range(num_devices):
-        x = (num_layers - layers_assigned) / (num_devices - i)
-        if x.is_integer():
-            balance.append(int(x))
-            layers_assigned += x
-        else:
-            balance.append(math.ceil(x))
-            layers_assigned += math.ceil(x)
-    return balance
-
 def extract_layer_info(layer):
     """
     Recursively extract layer information, handling layers with nested sub-layers.
     Ignoring Dropout layers and returning input and output features for each layer.
+    R, S: weight width and height
+    P, Q: output width and height
+    W,H: input width and height
+    C: input channel size
+    K: output channel size
+    N: batch size
     """
     sub_layers = list(layer.named_children())
     layer_infos = []
@@ -140,7 +129,6 @@ def extract_layer_info(layer):
 def make_partition(model, args):
     """
     Given sequential model, splits up layers
-    return partition 
     """
     partition_info = []
     for layer in model:
@@ -148,12 +136,19 @@ def make_partition(model, args):
         if layer_info:
             partition_info.append(layer_info)
     return partition_info
-    
+
+def schedule_model(model, args):
+    """
+    Takes model partition and schedules it to number of layers
+    """
+    blocks = 4
+    pass
 
 def runner(args):
     model = make_model(args).eval()
     partition = make_partition(model, args)
     pprint.pprint(partition)
+    accelerator = schedule_model(model, args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="build parallelizable LLM")
@@ -165,4 +160,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-decoder-layers", type=int, default=10, help="number of decoder layers")
     parser.add_argument("--num-devices", type=int, default=2, help="number of devices")
     parser.add_argument("--vocab-size", type=int, default=10000, help="number of tokens")
+    parser.add_argument("--dram-size", type=int, default=32, help="DRAM size (gb) for each accelerator")
+    parser.add_argument("--batch-size", type=int, default=32, help="workload batch size")
     runner(parser.parse_args())
