@@ -112,6 +112,8 @@ def extract_layer_info(layer, batch_size):
             # layers to ignore
             if isinstance(sub_layer, nn.Dropout):
                 continue
+            elif isinstance(sub_layer, nn.LayerNorm):
+                continue
             layer_infos.extend(extract_layer_info(sub_layer, batch_size))
     else:
         l['type'] = layer.__class__.__name__
@@ -154,18 +156,29 @@ def make_partition(model, args):
             partition_info.extend(layer_info)
     return partition_info
 
-def schedule_model(partition, args):
+def create_subworkload(partition, args):
     """
-    Takes model partition and schedules it to number of layers
+    Takes model partition and generates sub workloads
     """
-    blocks = 4
-    return partition
+    subworkload = partition.copy()
+    for layer in partition:
+        layer["P"] = layer["P"] // args.num_blocks
+        layer["repeated"] = args.num_blocks
+    return subworkload
+
+def assign_schedule(workload, args):
+    """
+    Given the list of subworkload that need to be run, we return a schedule
+    for which layers are run on which accelerators
+    """
+    return workload
 
 def runner(args):
     model = make_model(args).eval()
     partition = make_partition(model, args)
-    accelerator = schedule_model(partition, args)
-    pprint.pprint(partition)
+    sub_partition = create_subworkload(partition, args)
+    accelerator_workload = assign_schedule(sub_partition, args)
+    pprint.pprint(accelerator_workload)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="build parallelizable LLM")
@@ -177,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-decoder-layers", type=int, default=10, help="number of decoder layers")
     parser.add_argument("--num-devices", type=int, default=2, help="number of devices")
     parser.add_argument("--vocab-size", type=int, default=10000, help="number of tokens")
-    parser.add_argument("--dram-size", type=int, default=32, help="DRAM size (gb) for each accelerator")
+    parser.add_argument("--dram-size", type=int, default=32, help="DRAM size (mb) for each accelerator")
     parser.add_argument("--batch-size", type=int, default=32, help="workload batch size")
+    parser.add_argument("--num-blocks", type=int, default=4, help="number of blocks per dimension")
     runner(parser.parse_args())
