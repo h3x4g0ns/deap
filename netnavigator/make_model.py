@@ -19,7 +19,6 @@ class EmbeddingLayer(nn.Embedding):
     def forward(self, src):
         return super().forward(src) * math.sqrt(self.ninp)
 
-
 class PositionalEncodingLayer(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super().__init__()
@@ -38,7 +37,6 @@ class PositionalEncodingLayer(nn.Module):
     def forward(self, x):
         x = x + self.pe[: x.size(0), :]
         return self.dropout(x)
-
 
 class TransformerDecoderLayer(nn.TransformerEncoderLayer):
     """Though this class inherits from torch.nn.TransformerEncoderLayer,
@@ -59,13 +57,11 @@ class TransformerDecoderLayer(nn.TransformerEncoderLayer):
 
         return super().forward(src, self.src_mask)
 
-
 class LinearLayer(nn.Linear):
     def __init__(self, ninp, ntoken, initrange):
         super().__init__(ninp, ntoken)
         nn.init.zeros_(self.bias)
         nn.init.uniform_(self.weight, -initrange, initrange)
-
 
 class TransformerLMSequential(nn.Sequential):
     """A small language model based on the design of GPT-2 using nn.Sequential
@@ -149,7 +145,7 @@ def make_partition(model, args):
     
 
 def runner(args):
-    model = make_model(args)
+    model = make_model(args).eval()
     partition = make_partition(model, args)
     pprint.pprint(partition)
 
