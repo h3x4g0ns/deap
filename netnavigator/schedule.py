@@ -156,11 +156,11 @@ def make_partition(model, args):
     return partition_info
 
 class Task:
-    def __init__(self, id, duration, dependencies, details):
+    def __init__(self, id, duration, dependencies, details, earliest_start):
         self.id = id
         self.duration = duration
         self.dependencies = dependencies
-        self.earliest_start = 0
+        self.earliest_start = earliest_start
         self.details = details
 
     def create_precedence_graph(tasks, name):
@@ -185,8 +185,10 @@ class Scheduler:
         self.time = 0
 
     def update_earliest_start_times(self):
+        print("CALLED")
         for task in self.tasks.values():
             if task.dependencies:
+                print(task.dependencies)
                 task.earliest_start = max([self.tasks[d].earliest_start + self.tasks[d].duration for d in task.dependencies])
     
     def find_next_task(self):
@@ -196,7 +198,7 @@ class Scheduler:
         return None
 
     def assign_task(self, worker, task):
-        self.workload[worker].append((task.id, self.time, self.time + task.duration))
+        self.workload[worker].append((task.id, self.time, self.time + task.duration, task.details))
         self.time += task.duration
         del self.tasks[task.id]
 
@@ -218,24 +220,24 @@ def create_subworkload(partition, args):
     uid = 0
     tasks = []
     dependencies = [[], [], [], []]
-    for layer in partition:
+    for i, layer in enumerate(partition):
         for block in range(args.num_blocks):
             layer_copy = layer.copy()
             layer_copy["P"] = layer_copy["P"] // args.num_blocks
-            new_task = Task(str(uid), 1, dependencies[block], layer_copy)
+            new_task = Task(str(uid), 1, dependencies[block], layer_copy, i)
             dependencies[block] = [str(uid)]
             uid += 1
             tasks.append(new_task)
     Task.create_precedence_graph(tasks, args.workload_name)
     return tasks
 
-def assign_schedule(workload, args):
+def assign_schedule(workload, num_devices):
     """
     Given the list of subworkload that need to be run, we return a schedule
     for which layers are run on which accelerators
     """
-    print(args)
-    scheduler = Scheduler(workload, args.num_devices)
+    scheduler = Scheduler(workload, num_devices)
+    print(scheduler.tasks.keys())
     scheduler.schedule_tasks()
     return scheduler.workload
 
