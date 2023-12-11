@@ -181,36 +181,62 @@ class Scheduler:
     def __init__(self, tasks, num_workers):
         self.tasks = {task.id: task for task in tasks}
         self.num_workers = num_workers
-        self.workload = {worker: [] for worker in range(num_workers)}
         self.time = 0
 
-    def update_earliest_start_times(self):
-        print("CALLED")
-        for task in self.tasks.values():
-            if task.dependencies:
-                print(task.dependencies)
-                task.earliest_start = max([self.tasks[d].earliest_start + self.tasks[d].duration for d in task.dependencies])
-    
-    def find_next_task(self):
-        available_tasks = [task for task in self.tasks.values() if task.earliest_start <= self.time and not task.dependencies]
-        if available_tasks:
-            return min(available_tasks, key=lambda t: t.earliest_start)
-        return None
-
-    def assign_task(self, worker, task):
-        self.workload[worker].append((task.id, self.time, self.time + task.duration, task.details))
-        self.time += task.duration
-        del self.tasks[task.id]
-
     def schedule_tasks(self):
-        while self.tasks:
-            self.update_earliest_start_times()
-            for worker in range(self.num_workers):
-                task = self.find_next_task()
-                if task:
-                    self.assign_task(worker, task)
-                else:
-                    break
+        # so now that we have a list of tasks
+        # we want to pick the next task that needs to be finished and assign it to an empty accelerator
+        # make sure that we only assign a task if it's ancestorhas finished
+        from collections import deque
+
+        # Calculate in-degree (number of dependencies) for each task
+        in_degree = {task_id: 0 for task_id in self.tasks.keys()}
+        for task in self.tasks.values():
+            task_id, deps = task.id, task.dependencies
+            for dep in deps:
+                in_degree[task_id] += 1
+
+        # Find all tasks with no dependencies (roots)
+        queue = deque([task for task in self.tasks.keys() if in_degree[task] == 0])
+
+        # Perform topological sort
+        sorted_tasks = []
+        while queue:
+            task = queue.popleft()
+            sorted_tasks.append(task)
+            for dependent in self.tasks[task].dependencies:
+                if task in tasks[dependent]:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        queue.append(dependent)
+
+        # Assign tasks to workers
+        assignment = {worker: [] for worker in range(self.num_workers)}
+        for i, task in enumerate(sorted_tasks):
+            assignment[i % self.num_workers].append(self.tasks[task])
+
+        # Fill in "NOP" for idle time steps
+        max_length = max(len(tasks) for tasks in assignment.values())
+        for worker, tasks in assignment.items():
+            while len(tasks) < max_length:
+                tasks.append("NOP")
+
+        return assignment
+
+    # def create_schedule_graph(assingment, name):
+    #     # dot = Digraph(comment='Schedule Graph')
+
+    #     # # Add nodes for each task
+    #     # for task in tasks:
+    #     #     dot.node(task.id, f'Task {task.id}\nDuration: {task.duration}')
+
+    #     # # Add edges based on dependencies
+    #     # for task in tasks:
+    #     #     for dependency in task.dependencies:
+    #     #         dot.edge(dependency, task.id)
+
+    #     # dot.render(name, format="png")
+    #     pass
 
 def create_subworkload(partition, args):
     """
@@ -238,8 +264,9 @@ def assign_schedule(workload, num_devices):
     """
     scheduler = Scheduler(workload, num_devices)
     print(scheduler.tasks.keys())
-    scheduler.schedule_tasks()
-    return scheduler.workload
+    workload = scheduler.schedule_tasks()
+    return workload
+
 
 def runner(args):
     model = make_model(args).eval()
