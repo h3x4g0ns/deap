@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
-from torch.optim import Adam
-from torch.optim import Adam
 import math
 import argparse
 import pprint
+from graphviz import Digraph
 
 iteration_count = 0
 device = torch.device("cpu")
@@ -156,28 +155,95 @@ def make_partition(model, args):
             partition_info.extend(layer_info)
     return partition_info
 
+class Task:
+    def __init__(self, id, duration, dependencies, details):
+        self.id = id
+        self.duration = duration
+        self.dependencies = dependencies
+        self.earliest_start = 0
+        self.details = details
+
+    def create_precedence_graph(tasks, name):
+        dot = Digraph(comment='Precedence Graph')
+
+        # Add nodes for each task
+        for task in tasks:
+            dot.node(task.id, f'Task {task.id}\nDuration: {task.duration}')
+
+        # Add edges based on dependencies
+        for task in tasks:
+            for dependency in task.dependencies:
+                dot.edge(dependency, task.id)
+
+        dot.render(name, format="png")
+
+class Scheduler:
+    def __init__(self, tasks, num_workers):
+        self.tasks = {task.id: task for task in tasks}
+        self.num_workers = num_workers
+        self.workload = {worker: [] for worker in range(num_workers)}
+        self.time = 0
+
+    def update_earliest_start_times(self):
+        for task in self.tasks.values():
+            if task.dependencies:
+                task.earliest_start = max([self.tasks[d].earliest_start + self.tasks[d].duration for d in task.dependencies])
+    
+    def find_next_task(self):
+        available_tasks = [task for task in self.tasks.values() if task.earliest_start <= self.time and not task.dependencies]
+        if available_tasks:
+            return min(available_tasks, key=lambda t: t.earliest_start)
+        return None
+
+    def assign_task(self, worker, task):
+        self.workload[worker].append((task.id, self.time, self.time + task.duration))
+        self.time += task.duration
+        del self.tasks[task.id]
+
+    def schedule_tasks(self):
+        while self.tasks:
+            self.update_earliest_start_times()
+            for worker in range(self.num_workers):
+                task = self.find_next_task()
+                if task:
+                    self.assign_task(worker, task)
+                else:
+                    break
+
 def create_subworkload(partition, args):
     """
     Takes model partition and generates sub workloads
+    We give each subpartition a unique identifier to construct a schedule
     """
-    subworkload = partition.copy()
+    uid = 0
+    tasks = []
+    dependencies = [[], [], [], []]
     for layer in partition:
-        layer["P"] = layer["P"] // args.num_blocks
-        layer["repeated"] = args.num_blocks
-    return subworkload
+        for block in range(args.num_blocks):
+            layer_copy = layer.copy()
+            layer_copy["P"] = layer_copy["P"] // args.num_blocks
+            new_task = Task(str(uid), 1, dependencies[block], layer_copy)
+            dependencies[block] = [str(uid)]
+            uid += 1
+            tasks.append(new_task)
+    Task.create_precedence_graph(tasks, args.workload_name)
+    return tasks
 
 def assign_schedule(workload, args):
     """
     Given the list of subworkload that need to be run, we return a schedule
     for which layers are run on which accelerators
     """
-    return workload
+    print(args)
+    scheduler = Scheduler(workload, args.num_devices)
+    scheduler.schedule_tasks()
+    return scheduler.workload
 
 def runner(args):
     model = make_model(args).eval()
     partition = make_partition(model, args)
     sub_partition = create_subworkload(partition, args)
-    accelerator_workload = assign_schedule(sub_partition, args)
+    accelerator_workload = assign_schedule(sub_partition, 3)
     pprint.pprint(accelerator_workload)
 
 if __name__ == "__main__":
@@ -193,4 +259,5 @@ if __name__ == "__main__":
     parser.add_argument("--dram-size", type=int, default=32, help="DRAM size (mb) for each accelerator")
     parser.add_argument("--batch-size", type=int, default=32, help="workload batch size")
     parser.add_argument("--num-blocks", type=int, default=4, help="number of blocks per dimension")
+    parser.add_argument("--workload-name", type=str, default="basic_precedence", help="name of workload")
     runner(parser.parse_args())
