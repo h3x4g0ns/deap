@@ -184,59 +184,45 @@ class Scheduler:
         self.time = 0
 
     def schedule_tasks(self):
-        # so now that we have a list of tasks
-        # we want to pick the next task that needs to be finished and assign it to an empty accelerator
-        # make sure that we only assign a task if it's ancestorhas finished
-        from collections import deque
+        """
+        so now that we have a list of tasks
+        we want to pick the next task that needs to be finished and assign it to an empty accelerator
+        make sure that we only assign a task if it's ancestorhas finished
+        at any given timestep is an accelerator is not assigned to a task we want to assign it a "NOP"
+        we assume each task takes the same amount of time
+        and we assume there might be multiple tasks that have no dependencies
+        we want to assign a task if and only if it's dependencies have been scheduled and finished
+        keep assigning tasks until there are no more tasks to assign
+        """
+        tasks = self.tasks.copy()
+        current_timestemp = [0 for _ in range(self.num_workers)]
+        finished_tasks = set()
+        tasks_on_accelerators = [[None]*len(self.tasks) for _ in range(self.num_workers)]
 
-        # Calculate in-degree (number of dependencies) for each task
-        in_degree = {task_id: 0 for task_id in self.tasks.keys()}
-        for task in self.tasks.values():
-            task_id, deps = task.id, task.dependencies
-            for dep in deps:
-                in_degree[task_id] += 1
+        while len(finished_tasks) < len(self.tasks):
+            for i in range(self.num_workers):
+                if tasks_on_accelerators[i][current_timestemp[i]] is None:
+                    task_assigned = False
+                    for task_id, task in tasks.items():
+                        if set(task.dependencies).issubset(finished_tasks):
+                            tasks_on_accelerators[i][current_timestemp[i]] = task_id
+                            finished_tasks.add(task_id)
+                            del tasks[task_id]
+                            task_assigned = True
+                            break
+                    if not task_assigned:
+                        tasks_on_accelerators[i][current_timestemp[i]] = "NOP"
+                current_timestemp[i] += 1
 
-        # Find all tasks with no dependencies (roots)
-        queue = deque([task for task in self.tasks.keys() if in_degree[task] == 0])
-
-        # Perform topological sort
-        sorted_tasks = []
-        while queue:
-            task = queue.popleft()
-            sorted_tasks.append(task)
-            for dependent in self.tasks[task].dependencies:
-                if task in tasks[dependent]:
-                    in_degree[dependent] -= 1
-                    if in_degree[dependent] == 0:
-                        queue.append(dependent)
-
-        # Assign tasks to workers
-        assignment = {worker: [] for worker in range(self.num_workers)}
-        for i, task in enumerate(sorted_tasks):
-            assignment[i % self.num_workers].append(self.tasks[task])
-
-        # Fill in "NOP" for idle time steps
-        max_length = max(len(tasks) for tasks in assignment.values())
-        for worker, tasks in assignment.items():
-            while len(tasks) < max_length:
-                tasks.append("NOP")
-
-        return assignment
-
-    # def create_schedule_graph(assingment, name):
-    #     # dot = Digraph(comment='Schedule Graph')
-
-    #     # # Add nodes for each task
-    #     # for task in tasks:
-    #     #     dot.node(task.id, f'Task {task.id}\nDuration: {task.duration}')
-
-    #     # # Add edges based on dependencies
-    #     # for task in tasks:
-    #     #     for dependency in task.dependencies:
-    #     #         dot.edge(dependency, task.id)
-
-    #     # dot.render(name, format="png")
-    #     pass
+        # cleanup output
+        workload = [[] for _ in range(self.num_workers)]
+        for i in range(self.num_workers):
+            # print(i, j)
+            for j in range(len(self.tasks)):
+                if tasks_on_accelerators[i][j] is not None:
+                    workload[i].append(self.tasks[tasks_on_accelerators[i][j]].details)
+                    # workload[i].append(tasks_on_accelerators[i][j])
+        return workload   
 
 def create_subworkload(partition, args):
     """
@@ -263,7 +249,6 @@ def assign_schedule(workload, num_devices):
     for which layers are run on which accelerators
     """
     scheduler = Scheduler(workload, num_devices)
-    print(scheduler.tasks.keys())
     workload = scheduler.schedule_tasks()
     return workload
 
@@ -272,7 +257,7 @@ def runner(args):
     model = make_model(args).eval()
     partition = make_partition(model, args)
     sub_partition = create_subworkload(partition, args)
-    accelerator_workload = assign_schedule(sub_partition, 3)
+    accelerator_workload = assign_schedule(sub_partition, args.num_devices)
     pprint.pprint(accelerator_workload)
 
 if __name__ == "__main__":
