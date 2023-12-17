@@ -1,0 +1,14 @@
+{
+    "embedding_dimension": 2048,
+    "forward_dimension": 2048,
+    "num_heads": 32,
+    "dropout": 0,
+    "init_range": 0.1,
+    "num_decoder_layers": 10,
+    "num_devices": 2,
+    "vocab_size": 10000,
+    "dram_size": 32,
+    "batch_size": 32,
+    "num_blocks": 4,
+    "workload_name": "basic_precedence"
+}

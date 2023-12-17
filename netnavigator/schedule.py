@@ -4,6 +4,8 @@ import math
 import argparse
 import pprint
 from graphviz import Digraph
+import json
+import os
 
 iteration_count = 0
 device = torch.device("cpu")
@@ -258,7 +260,15 @@ def runner(args):
     partition = make_partition(model, args)
     sub_partition = create_subworkload(partition, args)
     accelerator_workload = assign_schedule(sub_partition, args.num_devices)
-    pprint.pprint(accelerator_workload)
+    for i, workload in enumerate(accelerator_workload):
+        file_path = f"workload/{args.workload_name}/{i}.txt"
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as f:
+            json.dump(workload, f, indent=4)
+    file_path = f"workload/{args.workload_name}/workload.txt"
+    with open(file_path, "w") as f:
+        json.dump(vars(args), f, indent=4)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="build parallelizable LLM")
