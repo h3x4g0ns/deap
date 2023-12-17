@@ -238,6 +238,7 @@ def create_subworkload(partition, args):
         for block in range(args.num_blocks):
             layer_copy = layer.copy()
             layer_copy["P"] = layer_copy["P"] // args.num_blocks
+            layer_copy["P_idx"] = (layer_copy["P"] // args.num_blocks) * block
             new_task = Task(str(uid), 1, dependencies[block], layer_copy, i)
             dependencies[block] = [str(uid)]
             uid += 1
